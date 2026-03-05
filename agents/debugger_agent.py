@@ -1,7 +1,20 @@
-import ollama
-from config import MODEL_NAME
+import re
+from langchain_groq import ChatGroq
+from dotenv import load_dotenv
+import os
 import subprocess
 import sys
+
+# ── Load environment variables ─────────────────────────────
+load_dotenv()
+
+# ── Configure Groq LLM once ────────────────────────────────
+llm = ChatGroq(
+    model="llama-3.3-70b-versatile",
+    temperature=0.1,                       # low for precise debugging
+    max_tokens=8192,
+    groq_api_key=os.getenv("GROQ_API_KEY")
+)
 
 FORCED_IMPORTS = """import torch
 import torch.nn as nn
@@ -43,8 +56,6 @@ def auto_install_dependencies(stderr):
     if not stderr:
         return False
     
-    import re
-    
     # Find missing module name
     match = re.search(r"No module named '([^']+)'", stderr)
     if not match:
@@ -84,7 +95,7 @@ def auto_install_dependencies(stderr):
         return False
 
 def fix_code(code, error, attempt):
-    """Ask Ollama to fix the broken code"""
+    """Ask Groq to fix the broken code"""
     print(f"🔧 Debugger Agent fixing code (attempt {attempt}/{MAX_RETRIES})...")
     
     prompt = f"""You are an expert Python debugger. Fix the error in this code.
@@ -104,6 +115,7 @@ STEP 2 - Environment context:
 STEP 3 - Common error fixes:
 - "out of bounds" or "Target X" → wrong number of output classes, use 10
 - "shape invalid" or "size mismatch" → wrong flatten size, recalculate
+- "mat1 and mat2 shapes cannot be multiplied" or any flatten/shape error → MUST replace any hardcoded x.view(-1, XXX) with x = x.view(x.size(0), -1) — this is the standard dynamic flatten in PyTorch to avoid size mismatches
 - "not defined" → missing import or variable, add it
 - "ModuleNotFoundError" → package missing, use alternative from available packages
 - "dimension" or "expected" → wrong tensor shape, fix reshape/view
@@ -111,6 +123,7 @@ STEP 3 - Common error fixes:
 - "attribute" errors → wrong method name, use correct PyTorch API
 - "value" errors → wrong parameter type or range, fix the value
 - "runtime" errors → logic error in forward pass, fix the calculation
+- "shape '[-1, 1600]' is invalid" or flatten error → use x.view(x.size(0), -1) for dynamic flattening — never hardcode feature size
 
 STEP 4 - Rules:
 - Fix ONLY what the error says, nothing else
@@ -125,13 +138,11 @@ BROKEN CODE:
 
 FIXED CODE:"""
 
-    response = ollama.chat(
-        model=MODEL_NAME,
-        messages=[{"role": "user", "content": prompt}]
-    )
+    # Call Groq
+    response = llm.invoke(prompt)
+    fixed_code = response.content.strip()
     
-    fixed_code = response['message']['content']
-    
+    # Clean up markdown if present
     if "```python" in fixed_code:
         fixed_code = fixed_code.split("```python")[1].split("```")[0]
     elif "```" in fixed_code:
@@ -176,7 +187,8 @@ def run_with_debug(code, code_path):
                 if installed:
                     # Retry without changing code
                     attempt += 1
-                    continue            
+                    continue
+            
             if attempt < MAX_RETRIES - 1:
                 current_code = fix_code(current_code, error, attempt + 1)
             else:

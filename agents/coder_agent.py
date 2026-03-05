@@ -1,20 +1,37 @@
-import ollama
 import re
-from config import MODEL_NAME, RANDOM_SEED
+from config import RANDOM_SEED
+from langchain_groq import ChatGroq
+from dotenv import load_dotenv
+import os
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Initialize Groq LLM once (outside the function for efficiency)
+llm = ChatGroq(
+    model="llama-3.3-70b-versatile",      # strong general-purpose model (2026)
+    temperature=0.1,                       # low = more deterministic code
+    max_tokens=8192,                       # plenty for full scripts
+    groq_api_key=os.getenv("GROQ_API_KEY")
+)
+
 
 def generate_code(filtered_text, domain="ml"):
-    print("🤖 Sending to Ollama for code generation...")
+    print("🤖 Sending to Groq for code generation...")
 
     if domain == "ml":
         prompt = f"""You are an expert ML engineer. Write a complete runnable Python script.
 
 STRICT RULES:
+- MUST use dynamic flattening before the final linear layer: ALWAYS do x = x.view(x.size(0), -1)  # this automatically computes the correct feature size — DO NOT EVER hardcode numbers like 1600, 5408, 1152, 36864, etc. This is CRITICAL to avoid shape errors.
+- Example: after last conv/pool: x = x.view(x.size(0), -1); x = self.fc1(x)
 - Use MNIST dataset from torchvision.datasets.MNIST
 - MNIST images are 28x28 pixels with 1 channel (grayscale)
 - MNIST has exactly 10 output classes (digits 0-9)
-- Last layer must always be nn.Linear(X, 10)
+- Last layer must be nn.Linear(feature_dim, 10) where feature_dim is from dynamic flatten
+- Optimizer: Use SGD with momentum=0.9 (common for MNIST/CIFAR papers) unless paper specifies otherwise
 - Use PyTorch only, no Keras or TensorFlow
-- Use small model: Conv2d max 32 filters first layer, 64 second layer
+- Use small model: Conv2d max 32 filters first layer, 64 second layer — but ALWAYS flatten dynamically
 - Keep model lightweight for CPU training
 - Always use torch.manual_seed(42) and np.random.seed(42)
 - Use transforms.Normalize((0.1307,), (0.3081,)) for MNIST
@@ -87,7 +104,7 @@ PAPER CONTEXT:
 Write the complete Python script now:"""
 
     elif domain == "graph":
-            prompt = f"""You are an expert ML engineer. Write a complete runnable Python script.
+        prompt = f"""You are an expert ML engineer. Write a complete runnable Python script.
 
 STRICT RULES:
 - Use PyTorch Geometric or simple synthetic graph data
@@ -137,12 +154,9 @@ PAPER CONTEXT:
 
 Write the complete Python script now:"""
 
-    response = ollama.chat(
-        model=MODEL_NAME,
-        messages=[{"role": "user", "content": prompt}]
-    )
-
-    code = response['message']['content']
+    # Call Groq LLM
+    response = llm.invoke(prompt)
+    code = response.content.strip()
 
     # Clean up markdown code blocks if present
     if "```python" in code:
@@ -154,11 +168,11 @@ Write the complete Python script now:"""
         # Remove existing import lines to avoid duplicates
         lines = code.split("\n")
         cleaned_lines = [l for l in lines if not l.strip().startswith("import torch")
-                        and not l.strip().startswith("import numpy")
-                        and not l.strip().startswith("from torch")
-                        and not l.strip().startswith("from torchvision")
-                        and not l.strip().startswith("torch.manual_seed")
-                        and not l.strip().startswith("np.random.seed")]
+                         and not l.strip().startswith("import numpy")
+                         and not l.strip().startswith("from torch")
+                         and not l.strip().startswith("from torchvision")
+                         and not l.strip().startswith("torch.manual_seed")
+                         and not l.strip().startswith("np.random.seed")]
         code = "\n".join(cleaned_lines)
 
         # Force all required imports at top
@@ -175,10 +189,10 @@ np.random.seed({RANDOM_SEED})
 """
         code = forced_imports + code
 
-        # Fix common output class errors
+        # Fix common output class errors for MNIST-like tasks
         code = re.sub(r'nn\.Linear\(([^,]+),\s*[1-9]\)',
-                     lambda m: f'nn.Linear({m.group(1)}, 10)',
-                     code)
+                      lambda m: f'nn.Linear({m.group(1)}, 10)',
+                      code)
 
     print("✅ Code generated successfully!")
     return code

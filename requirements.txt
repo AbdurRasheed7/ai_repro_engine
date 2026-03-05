@@ -1,0 +1,26 @@
+# Core ML & Data
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# LangChain & CrewAI
+langchain>=0.1.0
+langchain-community>=0.0.20
+langchain-groq>=0.0.1
+crewai>=0.30.0
+python-dotenv>=1.0.0
+
+# Embeddings & Vector DB (RAG)
+sentence-transformers>=2.2.0
+faiss-cpu>=1.7.4
+
+# Web & Parsing
+requests>=2.28.0
+beautifulsoup4>=4.11.0
+
+# UI
+streamlit>=1.25.0
+
+# Docker & Utils
+docker>=6.0.0

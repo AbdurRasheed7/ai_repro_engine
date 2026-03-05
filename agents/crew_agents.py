@@ -1,13 +1,21 @@
 from crewai import Agent, Task, Crew, Process
-from crewai.llm import LLM
+from langchain_groq import ChatGroq
+from crewai import LLM
+from dotenv import load_dotenv
 import os
 import json
 from datetime import datetime
 
-# ── Configure Ollama as LLM ────────────────────────────────
-ollama_llm = LLM(
-    model="ollama/qwen2.5-coder:7b-instruct",
-    base_url="http://localhost:11434"
+# ── Load environment variables ─────────────────────────────
+load_dotenv()
+
+# ── Configure Groq as LLM ──────────────────────────────────
+groq_llm = LLM(
+    model="groq/llama-3.3-70b-versatile",   # CrewAI recognizes "groq/" prefix
+    temperature=0.1,
+    max_tokens=8192,
+    api_key=os.getenv("GROQ_API_KEY"),      # CrewAI uses api_key field
+    base_url="https://api.groq.com/openai/v1"  # Groq's OpenAI-compatible endpoint
 )
 
 # ── Define Agents ──────────────────────────────────────────
@@ -20,7 +28,7 @@ parser_agent = Agent(
     contain the important implementation details and which are irrelevant.""",
     verbose=True,
     allow_delegation=False,
-    llm=ollama_llm
+    llm=groq_llm
 )
 
 coder_agent = Agent(
@@ -31,7 +39,7 @@ coder_agent = Agent(
     proper seeds and clear comments.""",
     verbose=True,
     allow_delegation=False,
-    llm=ollama_llm
+    llm=groq_llm
 )
 
 debugger_agent = Agent(
@@ -42,7 +50,7 @@ debugger_agent = Agent(
     the minimal fix needed to make code run correctly.""",
     verbose=True,
     allow_delegation=False,
-    llm=ollama_llm
+    llm=groq_llm
 )
 
 tester_agent = Agent(
@@ -53,7 +61,7 @@ tester_agent = Agent(
     identify when results match or deviate from paper claims.""",
     verbose=True,
     allow_delegation=False,
-    llm=ollama_llm
+    llm=groq_llm
 )
 
 hallucination_agent = Agent(
@@ -64,7 +72,7 @@ hallucination_agent = Agent(
     the original paper to flag any unsupported assumptions.""",
     verbose=True,
     allow_delegation=False,
-    llm=ollama_llm
+    llm=groq_llm
 )
 
 # ── Define Tasks ───────────────────────────────────────────

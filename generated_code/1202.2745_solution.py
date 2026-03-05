@@ -9,10 +9,20 @@ torch.manual_seed(42)
 np.random.seed(42)
 
 
+# Import necessary libraries
 
-# Set seeds for reproducibility
+# Set random seeds for reproducibility
 
-# Define transformations for the MNIST dataset
+# Define device (GPU or CPU)
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+# Define hyperparameters
+batch_size = 128
+num_epochs = 5
+learning_rate = 0.001
+momentum = 0.9
+
+# Define data transforms
 transform = transforms.Compose([
     transforms.ToTensor(),
     transforms.Normalize((0.1307,), (0.3081,))
@@ -20,77 +30,54 @@ transform = transforms.Compose([
 
 # Load MNIST dataset
 train_dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
-test_dataset = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+test_dataset = datasets.MNIST(root='./data', train=False, transform=transform)
 
 # Create data loaders
-train_loader = DataLoader(dataset=train_dataset, batch_size=128, shuffle=True)
-test_loader = DataLoader(dataset=test_dataset, batch_size=128, shuffle=False)
+train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
 
-# Define a simple Convolutional Neural Network
-class SimpleCNN(nn.Module):
+# Define the neural network model
+class Net(nn.Module):
     def __init__(self):
-        super(SimpleCNN, self).__init__()
-        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.fc1 = nn.Linear(64 * 7 * 7, 300)
-        self.fc2 = nn.Linear(300, 100)
-        self.fc3 = nn.Linear(100, 10)
+        super(Net, self).__init__()
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3)
+        self.pool = nn.MaxPool2d(2, 2)
+        self.fc1 = nn.Linear(64 * 5 * 5, 10)  # Dynamic flattening will be applied before this layer
 
     def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.max_pool2d(x, (2, 2))
-        x = F.relu(self.conv2(x))
-        x = F.max_pool2d(x, (2, 2))
-        x = x.view(-1, 64 * 7 * 7)
-        x = F.relu(self.fc1(x))
-        x = F.relu(self.fc2(x))
-        x = self.fc3(x)
+        x = self.pool(torch.relu(self.conv1(x)))
+        x = self.pool(torch.relu(self.conv2(x)))
+        x = x.view(x.size(0), -1)  # Dynamic flattening
+        x = self.fc1(x)
         return x
 
-# Initialize the model
-model = SimpleCNN()
-
-# Define loss function and optimizer
+# Initialize the model, optimizer, and loss function
+model = Net().to(device)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
+optimizer = optim.SGD(model.parameters(), lr=learning_rate, momentum=momentum)
 
-# Training loop for 5 epochs
-for epoch in range(5):
-    model.train()
-    running_loss = 0.0
-    correct = 0
-    total = 0
-    
-    for data in train_loader:
-        inputs, labels = data
+# Train the model
+for epoch in range(num_epochs):
+    for i, (images, labels) in enumerate(train_loader):
+        images, labels = images.to(device), labels.to(device)
         optimizer.zero_grad()
-        outputs = model(inputs)
+        outputs = model(images)
         loss = criterion(outputs, labels)
         loss.backward()
         optimizer.step()
-        
-        running_loss += loss.item()
-        _, predicted = torch.max(outputs.data, 1)
-        total += labels.size(0)
-        correct += (predicted == labels).sum().item()
 
-    print(f"Epoch {epoch+1}, Loss: {running_loss / len(train_loader)}, Accuracy: {(correct / total) * 100:.2f}%")
-
-# Testing the model
+# Evaluate the model on the test set
 model.eval()
-test_loss = 0.0
 correct = 0
 total = 0
-
 with torch.no_grad():
-    for data in test_loader:
-        inputs, labels = data
-        outputs = model(inputs)
-        loss = criterion(outputs, labels)
-        test_loss += loss.item()
-        _, predicted = torch.max(outputs.data, 1)
+    for images, labels in test_loader:
+        images, labels = images.to(device), labels.to(device)
+        outputs = model(images)
+        _, predicted = torch.max(outputs, 1)
         total += labels.size(0)
         correct += (predicted == labels).sum().item()
 
-accuracy = (correct / total) * 100
+accuracy = 100 * correct / total
 print(f"Final Accuracy: {accuracy:.2f}%")
