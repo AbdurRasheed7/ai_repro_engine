@@ -1,0 +1,84 @@
+# Python basics (official GitHub template core)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+venv/
+ENV/
+env/
+.env/
+.venv/
+
+# IDE / Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secrets & API keys (CRITICAL!)
+.env
+*.env.*
+secrets.yaml
+config_secrets.py
+
+# Ollama / local models (big files, don't commit)
+ollama/
+models/
+*.gguf
+*.bin
+*.pth
+*.h5          # your my_model.h5 is probably a test model — ignore if large
+my_model.h5
+
+# Generated / temp files in your project
+generated_code/
+reports/
+data/raw/
+data/downloaded/
+__pycache__/
+*.pyc
+*.log
+*.tmp
+*.cache
+faiss_index/     # if you save FAISS indexes
+
+# Streamlit / app runtime
+.streamlit/
+.cache/
+
+# Docker / build artifacts
+Dockerfile.*
+docker-compose.*
+*.dockerignore
+
+# Testing / golden files (if you don't want to commit large expected outputs)
+tests/golden/*.json   # or keep if small and useful for CI
+tests/*.actual
+
+# Misc large or irrelevant
+*.zip
+*.tar.gz
+*.gz
+.ipynb_checkpoints/
