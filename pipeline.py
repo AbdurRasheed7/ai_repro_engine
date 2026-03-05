@@ -36,7 +36,7 @@ def run_code(code_path):
     return result.stdout, result.stderr
 
 def main():
-    paper_id = "1807.01622"
+    paper_id = "1506.02078"
     golden_path = f"tests/golden/{paper_id}_expected.json"
     # Step 1 - Parse
     filtered_text = parse_paper(paper_id)
