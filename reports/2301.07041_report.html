@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Reproducibility Report - 2301.07041</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #f5f5f5; }
+        .header { background: #2c3e50; color: white; padding: 30px; border-radius: 10px; text-align: center; }
+        .card { background: white; padding: 25px; margin: 20px 0; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .score { font-size: 72px; font-weight: bold; color: #e74c3c; text-align: center; }
+        .score-label { text-align: center; color: #666; font-size: 18px; }
+        .status { font-size: 24px; text-align: center; margin: 10px 0; }
+        .metric { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .metric-label { color: #666; }
+        .metric-value { font-weight: bold; }
+        .code-block { background: #2c3e50; color: #ecf0f1; padding: 20px; border-radius: 8px; overflow-x: auto; font-family: monospace; font-size: 13px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+        .pass { color: #2ecc71; }
+        .fail { color: #e74c3c; }
+        .partial { color: #f39c12; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔬 AI Reproducibility Engine</h1>
+        <p>Paper ID: 2301.07041 | Generated: 2026-02-27 21:57:08</p>
+    </div>
+
+    <div class="card">
+        <div class="score">55.4</div>
+        <div class="score-label">Reproducibility Score / 100</div>
+        <div class="status">⚠️ PARTIAL - Outside tolerance</div>
+    </div>
+
+    <div class="card">
+        <h2>📊 Results Comparison</h2>
+        <div class="metric">
+            <span class="metric-label">Expected Accuracy (Paper Claim)</span>
+            <span class="metric-value">99.0%</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Actual Accuracy (Our Run)</span>
+            <span class="metric-value">96.54%</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Difference</span>
+            <span class="metric-value">2.46%</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Tolerance</span>
+            <span class="metric-value">±2.0%</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Errors Detected</span>
+            <span class="metric-value">No</span>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>💻 Generated Code</h2>
+        <div class="code-block">
+import torch
+from torchvision import datasets, transforms
+import numpy as np
+import torch.nn.functional as F
+
+torch.manual_seed(42)
+np.random.seed(42)
+
+# Define transformations for MNIST dataset
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.1307,), (0.3081,))
+])
+
+# Load MNIST dataset
+train_dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+test_dataset = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+
+# Create data loaders
+batch_size = 64
+train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size, shuffle=True)
+test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=batch_size, shuffle=False)
+
+# Define a simple neural network model
+class SimpleNet(torch.nn.Module):
+    def __init__(self):
+        super(SimpleNet, self).__init__()
+        self.fc1 = torch.nn.Linear(28*28, 128)
+        self.fc2 = torch.nn.Linear(128, 64)
+        self.fc3 = torch.nn.Linear(64, 10)
+
+    def forward(self, x):
+        x = F.relu(self.fc1(x.view(-1, 28*28)))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return F.log_softmax(x, dim=1)
+
+model = SimpleNet()
+
+# Define loss function and optimizer
+criterion = torch.nn.CrossEntropyLoss()
+optimizer = torch.optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
+
+# Training loop
+num_epochs = 5
+
+for epoch in range(num_epochs):
+    model.train()
+    for batch_idx, (data, target) in enumerate(train_loader):
+        optimizer.zero_grad()
+        output = model(data)
+        loss = criterion(output, target)
+        loss.backward()
+        optimizer.step()
+
+    print(f'Epoch {epoch+1}/{num_epochs}, Loss: {loss.item():.4f}')
+
+# Test the model
+model.eval()
+test_loss = 0
+correct = 0
+
+with torch.no_grad():
+    for data, target in test_loader:
+        output = model(data)
+        test_loss += criterion(output, target).item()
+        pred = output.argmax(dim=1, keepdim=True)
+        correct += pred.eq(target.view_as(pred)).sum().item()
+
+test_loss /= len(test_loader.dataset)
+accuracy = 100. * correct / len(test_loader.dataset)
+
+print(f"Final Accuracy: {accuracy:.2f}%")
+</div>
+    </div>
+
+    <div class="card" style="text-align:center; color:#666;">
+        <p>Generated by AI Reproducibility Engine | Powered by Ollama + qwen2.5-coder</p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Reproducibility Report - 1202.2745</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; background: #f5f5f5; }
+        .header { background: #2c3e50; color: white; padding: 30px; border-radius: 10px; text-align: center; }
+        .card { background: white; padding: 25px; margin: 20px 0; border-radius: 10px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }
+        .score { font-size: 72px; font-weight: bold; color: #2ecc71; text-align: center; }
+        .score-label { text-align: center; color: #666; font-size: 18px; }
+        .status { font-size: 24px; text-align: center; margin: 10px 0; }
+        .metric { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #eee; }
+        .metric-label { color: #666; }
+        .metric-value { font-weight: bold; }
+        .code-block { background: #2c3e50; color: #ecf0f1; padding: 20px; border-radius: 8px; overflow-x: auto; font-family: monospace; font-size: 13px; white-space: pre-wrap; max-height: 400px; overflow-y: auto; }
+        .pass { color: #2ecc71; }
+        .fail { color: #e74c3c; }
+        .partial { color: #f39c12; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔬 AI Reproducibility Engine</h1>
+        <p>Paper ID: 1202.2745 | Generated: 2026-03-01 22:31:06</p>
+    </div>
+
+    <div class="card">
+        <div class="score">87.8</div>
+        <div class="score-label">Reproducibility Score / 100</div>
+        <div class="status">✅ PASS</div>
+    </div>
+
+    <div class="card">
+        <h2>📊 Results Comparison</h2>
+        <div class="metric">
+            <span class="metric-label">Expected Accuracy (Paper Claim)</span>
+            <span class="metric-value">99.2%</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Actual Accuracy (Our Run)</span>
+            <span class="metric-value">97.37%</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Difference</span>
+            <span class="metric-value">1.83%</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Tolerance</span>
+            <span class="metric-value">±3.0%</span>
+        </div>
+        <div class="metric">
+            <span class="metric-label">Errors Detected</span>
+            <span class="metric-value">No</span>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>💻 Generated Code</h2>
+        <div class="code-block">import torch
+import torch.nn as nn
+import torch.optim as optim
+import torch.nn.functional as F
+import numpy as np
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+torch.manual_seed(42)
+np.random.seed(42)
+
+
+
+# Set seeds for reproducibility
+
+# Define transformations for the MNIST dataset
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.1307,), (0.3081,))
+])
+
+# Load MNIST dataset
+train_dataset = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+test_dataset = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+
+# Create data loaders
+train_loader = DataLoader(dataset=train_dataset, batch_size=128, shuffle=True)
+test_loader = DataLoader(dataset=test_dataset, batch_size=128, shuffle=False)
+
+# Define a simple Convolutional Neural Network
+class SimpleCNN(nn.Module):
+    def __init__(self):
+        super(SimpleCNN, self).__init__()
+        self.conv1 = nn.Conv2d(1, 32, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        self.fc1 = nn.Linear(64 * 7 * 7, 300)
+        self.fc2 = nn.Linear(300, 100)
+        self.fc3 = nn.Linear(100, 10)
+
+    def forward(self, x):
+        x = F.relu(self.conv1(x))
+        x = F.max_pool2d(x, (2, 2))
+        x = F.relu(self.conv2(x))
+        x = F.max_pool2d(x, (2, 2))
+        x = x.view(-1, 64 * 7 * 7)
+        x = F.relu(self.fc1(x))
+        x = F.relu(self.fc2(x))
+        x = self.fc3(x)
+        return x
+
+# Initialize the model
+model = SimpleCNN()
+
+# Define loss function and optimizer
+criterion = nn.CrossEntropyLoss()
+optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.5)
+
+# Training loop for 5 epochs
+for epoch in range(5):
+    model.train()
+    running_loss = 0.0
+    correct = 0
+    total = 0
+    
+    for data in train_loader:
+        inputs, labels = data
+        optimizer.zero_grad()
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        loss.backward()
+        optimizer.step()
+        
+        running_loss += loss.item()
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+    print(f"Epoch {epoch+1}, Loss: {running_loss / len(train_loader)}, Accuracy: {(correct / total) * 100:.2f}%")
+
+# Testing the model
+model.eval()
+test_loss = 0.0
+correct = 0
+total = 0
+
+with torch.no_grad():
+    for data in test_loader:
+        inputs, labels = data
+        outputs = model(inputs)
+        loss = criterion(outputs, labels)
+        test_loss += loss.item()
+        _, predicted = torch.max(outputs.data, 1)
+        total += labels.size(0)
+        correct += (predicted == labels).sum().item()
+
+accuracy = (correct / total) * 100
+print(f"Final Accuracy: {accuracy:.2f}%")
+</div>
+    </div>
+
+    <div class="card" style="text-align:center; color:#666;">
+        <p>Generated by AI Reproducibility Engine | Powered by Ollama + qwen2.5-coder</p>
+    </div>
+</body>
+</html>

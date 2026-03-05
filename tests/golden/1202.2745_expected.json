@@ -1,0 +1,10 @@
+{
+  "paper_id": "1202.2745",
+  "expected_accuracy": 99.2,
+  "tolerance": 3.0,
+  "optimizer": "Adam",
+  "dataset": "MNIST",
+  "seed": 42,
+  "epochs": 5,
+  "notes": "Simple CNN for MNIST"
+}
