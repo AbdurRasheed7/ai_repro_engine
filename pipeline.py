@@ -8,7 +8,6 @@ from agents.parser_agent import parse_paper
 from agents.rag_agent import get_relevant_context
 from agents.coder_agent import generate_code
 from agents.domain_detector import detect_domain, format_domain_report, get_code_domain
-from agents.debugger_agent import run_with_debug
 from agents.tester_agent import run_test, generate_html_report
 from agents.hallucination_agent import analyze_hallucinations, format_hallucination_report
 from agents.crew_agents import run_crew_analysis
@@ -63,24 +62,31 @@ def main(paper_id="1512.03385", run_crew=False, force_domain=None):
         print("\n--- GENERATED CODE PREVIEW (first 500 chars) ---")
         print(code[:500] + "..." if len(code) > 500 else code)
 
-        # Step 5: Save & Debug/Run code
-        print("\nStep 5: Saving & executing code...")
+        # Step 5: Save & Docker execution
+        print("\nStep 5: Saving & executing code in Docker...")
         code_path = save_code(code, paper_id)
-        stdout, stderr, final_code, attempts = run_with_debug(code, code_path)
-        print(f"   Completed in {attempts} attempt(s)")
-        if stdout:
-            print("\n--- STDOUT PREVIEW ---")
-            print(stdout[:800] + "..." if len(stdout) > 800 else stdout)
-        if stderr:
-            print("\n--- STDERR PREVIEW ---")
-            print(stderr[:800] + "..." if len(stderr) > 800 else stderr)
+        
+        success, logs, error = run_code_in_docker(code, paper_id)
+        
+        final_code = code  # Docker doesn't modify code — use original
+        
+        if success:
+            stdout = logs
+            stderr = ""
+            print("Docker SUCCESS! Logs preview:")
+            print(logs[:1000] + "..." if len(logs) > 1000 else logs)
+        else:
+            stdout = ""
+            stderr = error
+            print("Docker FAILED:")
+            print(error)
 
         # Step 6: Reproducibility test
         print("\nStep 6: Reproducibility check...")
         golden_path = f"tests/golden/{paper_id}_expected.json"
         if not os.path.exists(golden_path):
             print(f"   Warning: No golden JSON found for {paper_id}. Using defaults.")
-            golden_path = None  # or create temp one in tester_agent
+            golden_path = None
 
         test_result = run_test(paper_id, stdout, stderr, golden_path) if golden_path else {
             "reproducibility_score": 0,
@@ -98,7 +104,7 @@ def main(paper_id="1512.03385", run_crew=False, force_domain=None):
 
         # Step 7: Hallucination analysis
         print("\nStep 7: Hallucination check...")
-        hallucination = analyze_hallucinations(final_code or code, filtered_text)
+        hallucination = analyze_hallucinations(final_code, filtered_text)
         print(format_hallucination_report(hallucination))
 
         # Step 8: HTML report
@@ -111,12 +117,13 @@ def main(paper_id="1512.03385", run_crew=False, force_domain=None):
         if run_crew:
             print("\nStep 9: Running CrewAI multi-agent analysis...")
             crew_result = run_crew_analysis(
-                paper_id, filtered_text, rag_context, final_code or code,
+                paper_id, filtered_text, rag_context, final_code,
                 stdout, stderr, test_result, hallucination
             )
-            with open(f"reports/{paper_id}_crew_summary.txt", "w") as f:
+            crew_file = f"reports/{paper_id}_crew_summary.txt"
+            with open(crew_file, "w", encoding="utf-8") as f:
                 f.write(str(crew_result))
-            print("CrewAI summary saved to reports/")
+            print(f"CrewAI summary saved to: {crew_file}")
             print("\nCrewAI Analysis Summary:")
             print(crew_result)
         else:
