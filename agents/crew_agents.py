@@ -107,23 +107,35 @@ def create_tasks(paper_id, paper_text, rag_context, code, stdout, stderr,
         expected_output="Debugging summary with outcome and any fixes applied"
     )
 
+    # Safe access — repro_result may be partial if Docker failed
+    expected_acc  = repro_result.get('expected_accuracy',      'N/A')
+    actual_acc    = repro_result.get('actual_accuracy',        'N/A')
+    repro_score   = repro_result.get('reproducibility_score',  0)
+    repro_status  = repro_result.get('status',                 'FAILED')
+
     test_task = Task(
         description=f"""Review reproducibility results for paper {paper_id}.
-        Expected accuracy: {repro_result['expected_accuracy']}%
-        Actual accuracy: {repro_result['actual_accuracy']}%
-        Score: {repro_result['reproducibility_score']}/100
-        Status: {repro_result['status']}
+        Expected accuracy: {expected_acc}%
+        Actual accuracy: {actual_acc}%
+        Score: {repro_score}/100
+        Status: {repro_status}
         Provide a detailed analysis of the reproducibility results.""",
         agent=tester_agent,
         expected_output="Detailed reproducibility analysis with score justification"
     )
 
+    # Safe access — hallucination_result may be partial too
+    hall_score      = hallucination_result.get('hallucination_score',  0)
+    total_assumed   = hallucination_result.get('total_assumptions',    0)
+    total_from_paper= hallucination_result.get('total_from_paper',     0)
+    hall_summary    = hallucination_result.get('summary',              'No summary available')
+
     hallucination_task = Task(
         description=f"""Review hallucination analysis for paper {paper_id}.
-        Hallucination score: {hallucination_result['hallucination_score']}/100
-        Assumptions made: {hallucination_result['total_assumptions']}
-        Values from paper: {hallucination_result['total_from_paper']}
-        Summary: {hallucination_result['summary']}
+        Hallucination score: {hall_score}/100
+        Assumptions made: {total_assumed}
+        Values from paper: {total_from_paper}
+        Summary: {hall_summary}
         Provide recommendations to reduce hallucinations.""",
         agent=hallucination_agent,
         expected_output="Hallucination analysis with recommendations"

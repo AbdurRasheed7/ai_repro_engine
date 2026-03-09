@@ -38,7 +38,7 @@ ASSUMPTION_PATTERNS = [
 
 def analyze_hallucinations(code, paper_text):
     """Analyze generated code for hallucinations and assumptions"""
-    
+
     flags = []
     assumptions = []
     from_paper = []
@@ -55,17 +55,16 @@ def analyze_hallucinations(code, paper_text):
             "message": "AI explicitly flagged this as unknown"
         })
 
-    # 2. Check each pattern
+    # 2. Check each pattern — categorise as from_paper or assumption
     for pattern, description in ASSUMPTION_PATTERNS:
         matches = re.findall(pattern, code)
         for match in matches:
             value_str = match if isinstance(match, str) else match[0]
-            
+
             # Extract numeric part if present
             numbers = re.findall(r'[\d.eE+-]+', value_str)
             found_in_paper = False
-            
-            # Better matching: look for context around number in paper
+
             for num in numbers:
                 # Check if number appears near hyperparam words in paper
                 context_pattern = rf"(lr|learning rate|batch size|epochs?|hidden|dropout|momentum|weight decay|kernel|stride|padding)\s*[:=]\s*{re.escape(num)}"
@@ -76,7 +75,7 @@ def analyze_hallucinations(code, paper_text):
                 if num in paper_text and any(word in paper_text for word in ["lr", "batch", "epoch", "hidden", "dropout"]):
                     found_in_paper = True
                     break
-            
+
             if found_in_paper:
                 from_paper.append({
                     "detail": f"{description}: {value_str}",
@@ -91,10 +90,27 @@ def analyze_hallucinations(code, paper_text):
                     "message": "Value NOT clearly in paper — AI assumed"
                 })
 
-    # 3. Reverse optimizer check (paper specifies different optimizer)
+    # 3. Reverse optimizer check — only flag if NOT already handled in step 2
+    # Step 2 already categorises optim.SGD / optim.Adam etc. as from_paper or assumption.
+    # This step catches the case where the paper explicitly names a DIFFERENT optimizer
+    # than what ended up in the code — a true mismatch, not just an absence.
     code_optimizers = re.findall(r"optim\.(Adam|SGD|RMSprop|AdamW)", code)
     paper_optimizers = re.findall(r"(Adam|SGD|RMSprop|AdamW)", paper_text, re.IGNORECASE)
+
+    # Collect optimizers already handled in step 2 (either confirmed or assumed)
+    already_handled = set()
+    for item in from_paper + assumptions:
+        if "Optimizer" in item["detail"]:
+            # Extract just the optimizer name e.g. "SGD" from "optim.SGD"
+            m = re.search(r"optim\.(\w+)", item["detail"])
+            if m:
+                already_handled.add(m.group(1).lower())
+
     for opt in code_optimizers:
+        if opt.lower() in already_handled:
+            continue  # already counted in step 2 — skip to avoid double-counting
+        # Optimizer appears in code but wasn't caught by step 2 patterns
+        # and is NOT mentioned in paper at all
         if opt.lower() not in [o.lower() for o in paper_optimizers]:
             assumptions.append({
                 "type": "ASSUMED_OPTIMIZER",
@@ -110,7 +126,7 @@ def analyze_hallucinations(code, paper_text):
     else:
         # Weight: HIGH=3, MEDIUM=1
         weighted_assumptions = sum(3 if a['severity'] == 'HIGH' else 1 for a in assumptions) + len(flags) * 3
-        hallucination_score = max(0, round(100 - (weighted_assumptions / total_decisions * 60), 1))  # 60 max penalty
+        hallucination_score = max(0, round(100 - (weighted_assumptions / total_decisions * 60), 1))
 
     return {
         "flags": flags,
@@ -124,7 +140,7 @@ def analyze_hallucinations(code, paper_text):
 
 def format_hallucination_report(analysis):
     """Format hallucination analysis for display"""
-    
+
     report = "\n--- HALLUCINATION ANALYSIS ---\n"
     report += f"🧠 Hallucination Score: {analysis['hallucination_score']}/100 (higher = better)\n"
     report += f"📄 From Paper: {analysis['total_from_paper']} values\n"

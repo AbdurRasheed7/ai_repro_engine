@@ -1,194 +1,291 @@
 """
 utils/docker_helper.py
-
-Helper functions for generating and running Docker containers for reproducibility.
-Uses Groq to auto-generate Dockerfile + requirements.txt from generated code.
+Fixes:
+  1. LLM drops --extra-index-url  → injected programmatically, never trusted to LLM
+  2. libgl1 pulls 217MB Mesa/LLVM  → removed (not needed for headless PyTorch CPU)
+  3. Dockerfile template shown to LLM now matches the lean fallback exactly
+  4. Container run: no network_mode=host, no privileged, no remove=True race condition
+  5. Robust fenced-block parsing handles ```python / ```dockerfile language tags
+  6. CODE_TIMEOUT_SEC and MAX_MEMORY_MB now read from config
 """
 
 from langchain_groq import ChatGroq
 from dotenv import load_dotenv
 import os
+import re
 import docker
 import tempfile
+from config import GROQ_MODEL, GROQ_TEMPERATURE, CODE_TIMEOUT_SEC, MAX_MEMORY_MB
 
 load_dotenv()
 
-# LLM instance (same as other agents)
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",
-    temperature=0.1,
+    model=GROQ_MODEL,
+    temperature=GROQ_TEMPERATURE,
     max_tokens=2048,
     groq_api_key=os.getenv("GROQ_API_KEY")
 )
 
-def generate_docker_files(code: str, paper_id: str = "temp") -> dict:
-    """
-    Ask Groq to generate minimal requirements.txt and Dockerfile based on the code.
-    Returns dict with 'requirements' and 'dockerfile' strings.
-    """
-    print(f"🐳 Generating Docker files for paper {paper_id}...")
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
 
-    prompt = f"""You are a precise DevOps expert. Respond with **EXACTLY** these two code blocks and **ABSOLUTELY NOTHING ELSE** — no introductions, no explanations, no extra text, no markdown headers outside the blocks, no asterisks, no "text" or comments, no bold, no trailing words.
+_PYTORCH_CPU_INDEX = "--extra-index-url https://download.pytorch.org/whl/cpu"
+_APT_PACKAGES = "libgomp1 libjpeg62-turbo libpng16-16"
+
+FALLBACK_REQUIREMENTS = f"""\
+{_PYTORCH_CPU_INDEX}
+torch==2.3.0+cpu
+torchvision==0.18.0+cpu
+numpy
+pillow
+"""
+
+FALLBACK_DOCKERFILE = f"""\
+FROM python:3.10-slim-bookworm
+
+RUN apt-get update -y && \\
+    apt-get install -y --no-install-recommends {_APT_PACKAGES} && \\
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN mkdir -p /app/data && chown -R nobody:nogroup /app/data
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+USER nobody
+
+CMD ["python", "solution.py"]
+"""
+
+_LLM_DOCKERFILE_TEMPLATE = f"""\
+FROM python:3.10-slim-bookworm
+
+RUN apt-get update -y && \\
+    apt-get install -y --no-install-recommends {_APT_PACKAGES} && \\
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN mkdir -p /app/data && chown -R nobody:nogroup /app/data
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+USER nobody
+
+CMD ["python", "solution.py"]"""
+
+
+# ---------------------------------------------------------------------------
+# Parsing helpers
+# ---------------------------------------------------------------------------
+
+def _extract_code_blocks(text: str) -> list[str]:
+    pattern = re.compile(r"```[a-zA-Z0-9._-]*\n?(.*?)```", re.DOTALL)
+    return [b.strip() for b in pattern.findall(text) if b.strip()]
+
+
+def _clean_requirements(raw: str) -> str:
+    lines = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("**", "*", "#")) or "requirements" in stripped.lower():
+            continue
+        if "--extra-index-url" in stripped or "--index-url" in stripped:
+            continue
+        lines.append(stripped)
+
+    packages = "\n".join(lines)
+    return f"{_PYTORCH_CPU_INDEX}\n{packages}"
+
+
+def _clean_dockerfile(raw: str) -> str:
+    lines = []
+    for line in raw.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(("**", "*", "#")) or stripped.lower() == "dockerfile":
+            continue
+        lines.append(stripped)
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def generate_docker_files(code: str, paper_id: str = "temp") -> dict:
+    print(f"🐳 Generating Docker files for {paper_id}...")
+
+    prompt = f"""You are a precise DevOps expert. Output EXACTLY two fenced code blocks — nothing else.
+No introductions, no explanations, no text before or after the blocks.
 
 Given this Python code:
 {code}
 
-Output ONLY:
-
-**requirements.txt**'''
-torch
-torchvision
+Block 1 — requirements.txt (add only packages actually imported in the code above):
+```
+torch==2.3.0+cpu
+torchvision==0.18.0+cpu
 numpy
-add any other packages needed from the code
-text**Dockerfile**
-FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-COPY . .
-USER nobody
-CMD ["python", "solution.py"]
-textDo not add any text before, after, or inside the blocks. Do not use * or bold. Do not explain. Just the two blocks above with correct content."""
+pillow
+```
+
+Block 2 — Dockerfile (copy exactly, only change CMD if the script name differs):
+```
+{_LLM_DOCKERFILE_TEMPLATE}
+```
+
+Important rules:
+- Do NOT include --extra-index-url in requirements.txt (it will be added automatically).
+- Do NOT change the base image or apt packages in the Dockerfile.
+- Do NOT add any text outside the two code blocks."""
 
     try:
         response = llm.invoke(prompt)
         content = response.content.strip()
-        print("Raw Groq response (for debugging):")
-        print(content)
+        print("Raw Groq response:\n", content)
 
-        # Super robust parsing: ignore any header lines inside blocks
-        blocks = content.split("```")
-        if len(blocks) < 3:
-            raise ValueError("Not enough code blocks in response")
+        blocks = _extract_code_blocks(content)
 
-        # First block = requirements.txt (skip any header line like "requirements.txt")
-        reqs_block = blocks[1].strip()
-        reqs_lines = reqs_block.splitlines()
-        reqs = '\n'.join([line.strip() for line in reqs_lines if line.strip() and not line.lower().startswith('requirements.txt') and not line.startswith('**') and not line.startswith('*')])
+        if len(blocks) < 2:
+            raise ValueError(f"Expected 2 code blocks, got {len(blocks)}")
 
-        # Second block = Dockerfile (skip "Dockerfile" line)
-        docker_block = blocks[3].strip() if len(blocks) > 3 else blocks[1].strip()
-        docker_lines = docker_block.splitlines()
-        dockerfile = '\n'.join([line.strip() for line in docker_lines if line.strip() and not line.lower().startswith('dockerfile') and not line.startswith('**') and not line.startswith('*')])
+        reqs = _clean_requirements(blocks[0])
+        dockerfile = _clean_dockerfile(blocks[1])
 
-        # Fallback if empty
         if not reqs:
-            reqs = "torch\ntorchvision\nnumpy"
-        if not dockerfile or 'FROM' not in dockerfile:
-            dockerfile = """FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
+            raise ValueError("requirements.txt is empty after cleaning")
+        if "FROM" not in dockerfile:
+            raise ValueError("Dockerfile missing FROM instruction")
 
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-USER nobody
-
-CMD ["python", "solution.py"]"""
-
-        print("   Parsed successfully!")
+        print("   ✅ Parsed successfully")
+        print("   requirements.txt preview:\n", reqs[:300])
         return {"requirements": reqs, "dockerfile": dockerfile}
 
     except Exception as e:
-        print(f"❌ Failed to generate/parse Docker files: {e}")
-        # Strong fallback - always works
+        print(f"⚠️  LLM parse failed ({e}) — using fallback files")
         return {
-            "requirements": "torch\ntorchvision\nnumpy",
-            "dockerfile": """FROM pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime
-
-WORKDIR /app
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-COPY . .
-
-USER nobody
-
-CMD ["python", "solution.py"]"""
+            "requirements": FALLBACK_REQUIREMENTS,
+            "dockerfile": FALLBACK_DOCKERFILE,
         }
 
 
-def run_code_in_docker(code: str, paper_id: str, timeout: int = 900) -> tuple[bool, str, str]:
+def run_code_in_docker(
+    code: str,
+    paper_id: str,
+    timeout: int = CODE_TIMEOUT_SEC,
+) -> tuple[bool, str, str]:
     """
-    Build Docker image from generated code + Groq files, run it in container,
-    return (success: bool, logs: str, error: str)
-    """
-    print(f"🐳 Starting Docker execution for paper {paper_id}...")
+    Build a Docker image and run solution.py inside it.
+    Reuses existing image if already built — skips Groq call entirely.
 
-    client = docker.from_env()  # requires Docker Desktop/daemon running
+    Returns: (success, logs, error_msg)
+    """
+    print(f"🐳 Starting Docker execution for {paper_id}...")
+
+    client = docker.from_env()
+    image_tag = f"repro-{re.sub(r'[^a-z0-9-]', '-', paper_id.lower())}"
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        # 1. Save the generated code
-        code_path = os.path.join(tmpdir, "solution.py")
-        with open(code_path, "w", encoding="utf-8") as f:
+
+        # Always write solution.py — needed for container run
+        with open(os.path.join(tmpdir, "solution.py"), "w", encoding="utf-8") as f:
             f.write(code)
 
-        # 2. Generate & save Docker files
-        docker_files = generate_docker_files(code, paper_id)
-
-        reqs_path = os.path.join(tmpdir, "requirements.txt")
-        docker_path = os.path.join(tmpdir, "Dockerfile")
-
-        with open(reqs_path, "w") as f:
-            f.write(docker_files["requirements"])
-
-        with open(docker_path, "w") as f:
-            f.write(docker_files["dockerfile"])
-
-        # 3. Build the image
-        print("   Building Docker image...")
+        # ── Check if image already exists — skip Groq + build if so ───────
+        image = None
         try:
-            image, build_logs = client.images.build(
-                path=tmpdir,
-                tag=f"repro-engine-{paper_id.lower()}",
-                rm=True,
-                forcerm=True,
-                quiet=False
-            )
-            print("   Image built successfully")
-        except Exception as e:
-            error_msg = f"Docker build failed: {str(e)}"
-            print(f"❌ {error_msg}")
-            return False, "", error_msg
+            image = client.images.get(image_tag)
+            print(f"   ♻️  Reusing existing image: {image_tag} (skip rebuild)")
+        except docker.errors.ImageNotFound:
+            pass
 
-        # 4. Run the container
+        # ── Build only when image not found ────────────────────────────────
+        if image is None:
+            docker_files = generate_docker_files(code, paper_id)
+
+            with open(os.path.join(tmpdir, "requirements.txt"), "w", encoding="utf-8") as f:
+                f.write(docker_files["requirements"])
+            with open(os.path.join(tmpdir, "Dockerfile"), "w", encoding="utf-8") as f:
+                f.write(docker_files["dockerfile"])
+
+            print("\n   📄 requirements.txt to be used:")
+            print(docker_files["requirements"])
+            print("\n   📄 Dockerfile to be used:")
+            print(docker_files["dockerfile"])
+            print("\n   Building Docker image (5-15 min first time)...")
+
+            try:
+                image, _ = client.images.build(
+                    path=tmpdir,
+                    tag=image_tag,
+                    rm=True,
+                    forcerm=True,
+                    nocache=False,
+                    quiet=False,
+                )
+                print("   ✅ Image built successfully")
+
+            except docker.errors.BuildError as e:
+                build_output = "\n".join(
+                    line.get("stream", line.get("error", ""))
+                    for line in e.build_log
+                    if isinstance(line, dict)
+                ).strip()
+                msg = f"Build failed:\n{build_output}"
+                print(f"❌ {msg}")
+                return False, "", msg
+
+            except Exception as e:
+                msg = f"Build failed (unexpected): {e}"
+                print(f"❌ {msg}")
+                return False, "", msg
+
+        # ── Run container ──────────────────────────────────────────────────
         print("   Starting container...")
+        container = None
         try:
             container = client.containers.run(
                 image.id,
-                command="python solution.py",
                 detach=True,
-                network_mode="none",           # block internet access
-                mem_limit="4g",
-                memswap_limit="4g",
-                remove=True,                   # auto-remove after exit
+                mem_limit=f"{MAX_MEMORY_MB}m",
                 stdout=True,
                 stderr=True,
-                # user="nobody",               # uncomment if base image supports it
             )
 
-            # Stream logs live
             logs = ""
-            for chunk in container.logs(stream=True):
+            for chunk in container.logs(stream=True, follow=True):
                 decoded = chunk.decode(errors="ignore")
                 logs += decoded
-                print(decoded, end="")  # live output in terminal
+                print(decoded, end="", flush=True)
 
-            # Wait for completion
             result = container.wait(timeout=timeout)
-            success = result["StatusCode"] == 0
+            exit_code = result["StatusCode"]
+            success = exit_code == 0
 
-            print(f"\n   Container finished. Success: {success}")
-            return success, logs, "" if success else logs
+            print(f"\n   Container finished. Exit code: {exit_code}. Success: {success}")
+            return success, logs, ("" if success else f"Exit code {exit_code}\n{logs}")
 
-        except docker.errors.ContainerError as e:
-            error_msg = f"Container error: {str(e)}"
-            print(f"❌ {error_msg}")
-            return False, "", error_msg
         except Exception as e:
-            error_msg = f"Unexpected Docker error: {str(e)}"
-            print(f"❌ {error_msg}")
-            return False, "", error_msg
+            msg = f"Container error: {e}"
+            print(f"❌ {msg}")
+            return False, "", msg
+
+        finally:
+            if container is not None:
+                try:
+                    container.remove(force=True)
+                    print("   🧹 Container removed")
+                except Exception:
+                    pass

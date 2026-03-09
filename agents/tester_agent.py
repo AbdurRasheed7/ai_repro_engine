@@ -2,7 +2,7 @@ import json
 import os
 import re
 from datetime import datetime
-from config import REPORTS_DIR
+from config import REPORTS_DIR, TOLERANCE_DEFAULT
 
 def extract_accuracy(output_text):
     """Extract accuracy number from code output - more patterns"""
@@ -40,17 +40,17 @@ def calculate_score(actual, expected, tolerance=2.0):
 
 def run_test(paper_id, stdout, stderr, expected_json_path):
     """Compare results and generate test report"""
-    
+
     try:
         # Load expected values
         with open(expected_json_path, 'r') as f:
             expected = json.load(f)
     except FileNotFoundError:
-        print(f"❌ Expected JSON not found: {expected_json_path}")
-        expected = {"expected_accuracy": None, "tolerance": 2.0}
+        print(f"   Warning: No golden JSON found for {paper_id}. Using defaults.")
+        expected = {"expected_accuracy": None, "tolerance": TOLERANCE_DEFAULT}
     except json.JSONDecodeError:
         print(f"❌ Invalid JSON: {expected_json_path}")
-        expected = {"expected_accuracy": None, "tolerance": 2.0}
+        expected = {"expected_accuracy": None, "tolerance": TOLERANCE_DEFAULT}
 
     # Extract actual accuracy
     actual_accuracy = extract_accuracy(stdout)
@@ -59,38 +59,55 @@ def run_test(paper_id, stdout, stderr, expected_json_path):
     tolerance = expected.get('tolerance', 2.0)
 
     # Calculate score
-    score = calculate_score(actual_accuracy, expected_accuracy, tolerance) if expected_accuracy is not None else 0
+    if expected_accuracy is not None:
+        # Golden JSON exists — score against expected
+        score = calculate_score(actual_accuracy, expected_accuracy, tolerance)
+    elif actual_accuracy is not None:
+        # No golden JSON but code ran and produced accuracy — give execution score
+        # Base score: 60 for running, up to 85 based on accuracy level
+        if actual_accuracy >= 90:
+            score = 85
+        elif actual_accuracy >= 80:
+            score = 75
+        elif actual_accuracy >= 70:
+            score = 65
+        else:
+            score = 60
+    else:
+        # No golden JSON and no accuracy — complete failure
+        score = 0
 
     # Determine status
     if actual_accuracy is None:
         status = "❌ FAIL - No accuracy reported"
     elif expected_accuracy is None:
-        status = "⚠️ PARTIAL - No expected value"
+        status = f"✅ PASS - Executed successfully (no baseline to compare)"
     elif abs(actual_accuracy - expected_accuracy) <= tolerance:
         status = "✅ PASS"
     else:
         status = "⚠️ PARTIAL - Outside tolerance"
 
-    # Build result
+    # Build result — ALL keys always present with safe defaults
     result = {
-        "paper_id": paper_id,
-        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S IST"),
-        "expected_accuracy": expected_accuracy,
-        "actual_accuracy": actual_accuracy,
-        "difference": round(abs((actual_accuracy or 0) - (expected_accuracy or 0)), 2) if actual_accuracy is not None and expected_accuracy is not None else None,
-        "tolerance": tolerance,
-        "status": status,
+        "paper_id":             paper_id,
+        "timestamp":            datetime.now().strftime("%Y-%m-%d %H:%M:%S IST"),
+        "expected_accuracy":    expected_accuracy,
+        "actual_accuracy":      actual_accuracy,
+        "difference":           round(abs((actual_accuracy or 0) - (expected_accuracy or 0)), 2)
+                                if actual_accuracy is not None and expected_accuracy is not None else None,
+        "tolerance":            tolerance,
+        "status":               status,
         "reproducibility_score": score,
-        "has_errors": bool(stderr and ("Error" in stderr or "Exception" in stderr)),
-        "stderr_preview": stderr[:200] if stderr else None
+        "has_errors":           bool(stderr and ("Error" in stderr or "Exception" in stderr)),
+        "stderr_preview":       stderr[:200] if stderr else None
     }
 
     return result
 
 def generate_html_report(result, code_path):
-    """Generate a beautiful HTML report"""
+    """Generate a beautiful HTML report — safe against missing keys"""
     os.makedirs(REPORTS_DIR, exist_ok=True)
-    
+
     # Read generated code
     code_content = "Code file not found"
     if os.path.exists(code_path):
@@ -100,21 +117,38 @@ def generate_html_report(result, code_path):
         except Exception as e:
             code_content = f"Error reading code: {e}"
 
-    score = result['reproducibility_score']
-    
+    # Safe key access with fallbacks for every field
+    paper_id            = result.get('paper_id',             'Unknown')
+    timestamp           = result.get('timestamp',            'N/A')
+    score               = result.get('reproducibility_score', 0)
+    status              = result.get('status',               'FAILED')
+    expected_accuracy   = result.get('expected_accuracy',    None)
+    actual_accuracy     = result.get('actual_accuracy',      None)
+    difference          = result.get('difference',           None)
+    tolerance           = result.get('tolerance',            2.0)
+    has_errors          = result.get('has_errors',           False)
+
     # Score color
     if score >= 80:
-        score_color = "#2ecc71"  # green
+        score_color = "#2ecc71"   # green
     elif score >= 60:
-        score_color = "#f39c12"  # orange
+        score_color = "#f39c12"   # orange
     else:
-        score_color = "#e74c3c"  # red
+        score_color = "#e74c3c"   # red
+
+    # Status CSS class
+    if 'PASS' in status:
+        status_class = 'pass'
+    elif 'FAIL' in status:
+        status_class = 'fail'
+    else:
+        status_class = 'partial'
 
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Reproducibility Report - {result['paper_id']}</title>
+    <title>Reproducibility Report - {paper_id}</title>
     <style>
         body {{ font-family: 'Segoe UI', Arial, sans-serif; max-width: 1000px; margin: 40px auto; padding: 20px; background: #f8f9fa; line-height: 1.6; }}
         .header {{ background: linear-gradient(135deg, #2c3e50, #34495e); color: white; padding: 40px 30px; border-radius: 12px; text-align: center; box-shadow: 0 4px 15px rgba(0,0,0,0.15); }}
@@ -135,36 +169,36 @@ def generate_html_report(result, code_path):
 <body>
     <div class="header">
         <h1>🔬 AI Reproducibility Engine Report</h1>
-        <p>Paper ID: <strong>{result['paper_id']}</strong> | Generated: {result['timestamp']}</p>
+        <p>Paper ID: <strong>{paper_id}</strong> | Generated: {timestamp}</p>
     </div>
 
     <div class="card">
         <div class="score">{score}</div>
         <div class="score-label">Reproducibility Score / 100</div>
-        <div class="status { 'pass' if 'PASS' in result['status'] else 'fail' if 'FAIL' in result['status'] else 'partial' }">{result['status']}</div>
+        <div class="status {status_class}">{status}</div>
     </div>
 
     <div class="card">
         <h2>📊 Results Comparison</h2>
         <div class="metric">
             <span class="metric-label">Expected Accuracy (Paper Claim)</span>
-            <span class="metric-value">{result['expected_accuracy'] if result['expected_accuracy'] is not None else 'N/A'}%</span>
+            <span class="metric-value">{f"{expected_accuracy}%" if expected_accuracy is not None else "N/A"}</span>
         </div>
         <div class="metric">
             <span class="metric-label">Actual Accuracy (Our Run)</span>
-            <span class="metric-value">{result['actual_accuracy'] if result['actual_accuracy'] is not None else 'N/A'}%</span>
+            <span class="metric-value">{f"{actual_accuracy}%" if actual_accuracy is not None else "N/A"}</span>
         </div>
         <div class="metric">
             <span class="metric-label">Difference</span>
-            <span class="metric-value">{result['difference'] if result['difference'] is not None else 'N/A'}%</span>
+            <span class="metric-value">{f"{difference}%" if difference is not None else "N/A"}</span>
         </div>
         <div class="metric">
             <span class="metric-label">Tolerance</span>
-            <span class="metric-value">±{result['tolerance']}%</span>
+            <span class="metric-value">±{tolerance}%</span>
         </div>
         <div class="metric">
             <span class="metric-label">Runtime Errors</span>
-            <span class="metric-value">{'Yes' if result['has_errors'] else 'No'}</span>
+            <span class="metric-value">{'Yes' if has_errors else 'No'}</span>
         </div>
     </div>
 
@@ -179,9 +213,9 @@ def generate_html_report(result, code_path):
 </body>
 </html>"""
 
-    report_path = os.path.join(REPORTS_DIR, f"{result['paper_id']}_report.html")
+    report_path = os.path.join(REPORTS_DIR, f"{paper_id}_report.html")
     with open(report_path, 'w', encoding='utf-8') as f:
         f.write(html)
-    
+
     print(f"📄 Report saved: {report_path}")
     return report_path

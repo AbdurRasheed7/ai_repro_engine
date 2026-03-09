@@ -10,6 +10,8 @@ from agents.coder_agent import generate_code
 from agents.domain_detector import detect_domain, format_domain_report, get_code_domain
 from agents.tester_agent import run_test, generate_html_report
 from agents.hallucination_agent import analyze_hallucinations, format_hallucination_report
+from agents.golden_agent import extract_expected_accuracy
+from agents.debugger_agent import run_with_debug
 from agents.crew_agents import run_crew_analysis
 from data.download_movielens import download_movielens
 from utils.docker_helper import run_code_in_docker
@@ -53,7 +55,7 @@ def main(paper_id="1512.03385", run_crew=False, force_domain=None):
 
         # Step 3: RAG context
         print("Step 3: Building RAG context...")
-        rag_context = get_relevant_context(filtered_text)
+        rag_context = get_relevant_context(filtered_text, domain=domain)
         print(f"   Retrieved {len(rag_context):,} chars of relevant context")
 
         # Step 4: Generate code
@@ -65,36 +67,28 @@ def main(paper_id="1512.03385", run_crew=False, force_domain=None):
         # Step 5: Save & Docker execution
         print("\nStep 5: Saving & executing code in Docker...")
         code_path = save_code(code, paper_id)
-        
+
         success, logs, error = run_code_in_docker(code, paper_id)
-        
-        final_code = code  # Docker doesn't modify code — use original
-        
+
         if success:
             stdout = logs
             stderr = ""
+            final_code = code
             print("Docker SUCCESS! Logs preview:")
             print(logs[:1000] + "..." if len(logs) > 1000 else logs)
         else:
-            stdout = ""
-            stderr = error
-            print("Docker FAILED:")
+            print("Docker FAILED — falling back to local debugger...")
             print(error)
+            stdout, stderr, final_code, attempts = run_with_debug(code, code_path, domain=domain)
+            if "Final Accuracy" in stdout:
+                print(f"✅ Debugger recovered after {attempts} attempt(s)!")
+            else:
+                print(f"❌ Debugger also failed after {attempts} attempt(s)")
 
-        # Step 6: Reproducibility test
+        # Step 6: Extract expected accuracy from paper (auto-generates golden JSON)
         print("\nStep 6: Reproducibility check...")
-        golden_path = f"tests/golden/{paper_id}_expected.json"
-        if not os.path.exists(golden_path):
-            print(f"   Warning: No golden JSON found for {paper_id}. Using defaults.")
-            golden_path = None
-
-        test_result = run_test(paper_id, stdout, stderr, golden_path) if golden_path else {
-            "reproducibility_score": 0,
-            "status": "⚠️ No expected values",
-            "actual_accuracy": None,
-            "expected_accuracy": None,
-            "difference": None
-        }
+        golden_path = extract_expected_accuracy(paper_id, filtered_text)
+        test_result = run_test(paper_id, stdout, stderr, golden_path)
 
         print(f"   Expected Accuracy : {test_result.get('expected_accuracy', 'N/A')}%")
         print(f"   Actual Accuracy   : {test_result.get('actual_accuracy', 'N/A')}%")
@@ -143,9 +137,9 @@ if __name__ == "__main__":
     parser.add_argument("--paper", default="1512.03385", help="ArXiv paper ID")
     parser.add_argument("--crew", action="store_true", help="Run full CrewAI analysis")
     parser.add_argument("--domain", help="Force domain (ml, algorithm, nlp, etc.)")
-    
+
     args = parser.parse_args()
-    
+
     main(
         paper_id=args.paper,
         run_crew=args.crew,

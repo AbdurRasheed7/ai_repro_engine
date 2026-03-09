@@ -1,0 +1,24 @@
+
+============================================================
+Traceback (most recent call last):
+  File "D:\ai_repro_engine\pipeline.py", line 149, in <module>
+    main(
+    ~~~~^
+        paper_id=args.paper,
+        ^^^^^^^^^^^^^^^^^^^^
+        run_crew=args.crew,
+        ^^^^^^^^^^^^^^^^^^^
+        force_domain=args.domain
+        ^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "D:\ai_repro_engine\pipeline.py", line 27, in main
+    print(f"\U0001f680 Starting Reproducibility Pipeline for paper: {paper_id}")
+    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\ai_repro_engine\venv\Lib\site-packages\crewai\llm.py", line 141, in write
+    return self._original_stream.write(s)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^
+  File "C:\Users\ABDUR RASHEED\AppData\Local\Programs\Python\Python313\Lib\encodings\cp1252.py", line 19, in encode
+    return codecs.charmap_encode(input,self.errors,encoding_table)[0]
+           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+UnicodeEncodeError: 'charmap' codec can't encode character '\U0001f680' in position 0: character maps to <undefined>

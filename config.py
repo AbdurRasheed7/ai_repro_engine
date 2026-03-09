@@ -1,25 +1,25 @@
 import os
 
 # ── Project Paths ───────────────────────────────────────────────
-BASE_DIR = r"D:\ai_repro_engine"
-INPUT_DIR = os.path.join(BASE_DIR, "input")
+BASE_DIR   = r"D:\ai_repro_engine"
+INPUT_DIR  = os.path.join(BASE_DIR, "input")
 OUTPUT_DIR = os.path.join(BASE_DIR, "generated_code")
-REPORTS_DIR = os.path.join(BASE_DIR, "reports")
-PROMPTS_DIR = os.path.join(BASE_DIR, "prompts")
-TESTS_DIR = os.path.join(BASE_DIR, "tests")
+REPORTS_DIR= os.path.join(BASE_DIR, "reports")
+PROMPTS_DIR= os.path.join(BASE_DIR, "prompts")
+TESTS_DIR  = os.path.join(BASE_DIR, "tests")
 GOLDEN_DIR = os.path.join(TESTS_DIR, "golden")
 
 # ── LLM Configuration (Groq) ────────────────────────────────────
-# No MODEL_NAME needed anymore — handled in each agent file
-# Groq API key is loaded from .env (via dotenv)
-GROQ_MODEL = "llama-3.3-70b-versatile"  # default, can override per agent
+# Used by: coder_agent, debugger_agent, golden_agent, docker_helper
+# Agents that need different settings override locally
+GROQ_MODEL       = "llama-3.3-70b-versatile"
 GROQ_TEMPERATURE = 0.1
-GROQ_MAX_TOKENS = 8192
+GROQ_MAX_TOKENS  = 8192
 
 # ── RAG Settings ────────────────────────────────────────────────
-CHUNK_SIZE = 800          # increased a bit for better context
-CHUNK_OVERLAP = 150       # more overlap to avoid cutting sentences
-TOP_K_CHUNKS = 6          # retrieve a few more for richer context
+CHUNK_SIZE      = 800   # chars per chunk
+CHUNK_OVERLAP   = 150   # overlap between chunks to avoid cutting sentences
+TOP_K_CHUNKS    = 6     # chunks retrieved per query
 EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
 # ── Reproducibility & Randomness ────────────────────────────────
@@ -39,15 +39,16 @@ STOP_SECTIONS = [
     "conclusion", "conclusions", "discussion", "references",
     "appendix", "acknowledgment", "acknowledgements", "future work",
     "related work", "supplementary", "supplemental", "ablation",
-    "proof", "theorem", "appendix", "bibliography"
+    "proof", "theorem", "bibliography"
 ]
 
 # ── Docker / Execution Settings ─────────────────────────────────
-CODE_TIMEOUT_SEC = 900          # 15 minutes max run time
-DOCKER_BASE_IMAGE = "pytorch/pytorch:2.3.0-cuda12.1-cudnn8-runtime"  # good for CV
-MAX_MEMORY_MB = 4096            # limit container memory
+# NOTE: docker_helper.py uses python:3.10-slim-bookworm (CPU-only, lean image)
+# CODE_TIMEOUT_SEC and MAX_MEMORY_MB are passed to docker_helper.run_code_in_docker
+CODE_TIMEOUT_SEC = 900    # 15 minutes max container run time
+MAX_MEMORY_MB    = 4096   # container memory limit (4GB)
 
 # ── Report & UI Settings ────────────────────────────────────────
-REPORT_TEMPLATE = "default"     # can add more later
+REPORT_TEMPLATE    = "default"
 EXPECTED_ACC_DEFAULT = 95.0
-TOLERANCE_DEFAULT = 2.0
+TOLERANCE_DEFAULT    = 2.0
